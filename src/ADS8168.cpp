@@ -10,6 +10,8 @@
 
 #include "config.h"
 
+#include "ADS8168_reg.h"
+
 // Helpers
 #define CMD_ADDRESS_MASK     ((1 << 11) - 1)
 
