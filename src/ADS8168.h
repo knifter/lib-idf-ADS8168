@@ -13,7 +13,12 @@ class ADS
         //~ADS();
 
         esp_err_t init();
+        void setChannel(const uint8_t channelno);
+        esp_err_t readChannel(uint16_t* counts, uint8_t* channel);
+
         esp_err_t read_test();
+        esp_err_t acquire_bus();
+        void release_bus();
 
     protected:
         typedef enum {
@@ -28,12 +33,10 @@ class ADS
             uint8_t a, b;
         } pietje_t;
         
-        // Private methods
         void write_cmd(const adc_cmd_t cmd, const uint16_t address, const uint8_t data);
 
-        // Variables
         spi_device_handle_t _spi;
-    
+
     private:
         ADS(const ADS&);
         ADS& operator=(const ADS&);

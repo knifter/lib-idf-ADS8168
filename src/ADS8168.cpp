@@ -8,32 +8,56 @@
 #include "driver/spi_master.h"
 #include "freertos/task.h"
 #include <esp_log.h>
-#include <esp_heap_alloc_caps.h>
-
-#include "config.h"
-#include "log.h"
+#include <esp_heap_caps.h>
 
 #include "ADS8168_reg.h"
 
-#define LOG_LOCAL_LEVEL     ESP_LOG_VERBOSE
+
+#include <math.h>
+#include "HardwareSerial.h"
+// #define LOG_LOCAL_LEVEL     ESP_LOG_VERBOSE
+// #define DBG(msg, ...)      Serial.printf("%s: " msg "\n", __FUNCTION__, ##__VA_ARGS__)
 
 // Helpers
 #define CMD_ADDRESS_MASK    ((uint16_t)(1 << 11) - 1)
 
 #define N_CHANNELS          4
 
+void pre_transaction_cb(spi_transaction_t* t)
+{
+    gpio_set_level(GPIO_NUM_5, 0);
+}
+
+void post_transaction_cb(spi_transaction_t* t)
+{
+// #define WAIT_LOOPS  100
+//     uint16_t n;
+//     for(n = 0; n < WAIT_LOOPS; n++) 
+//     {
+//         asm("");
+//     };
+    gpio_set_level(GPIO_NUM_23, 0);
+    gpio_set_level(GPIO_NUM_5, 1);
+}
+
 ADS::ADS(spi_host_device_t host, gpio_num_t cs)
 {
-    spi_device_interface_config_t devcfg;
+    spi_device_interface_config_t devcfg = 
     {
-        memset(&devcfg, 0, sizeof(devcfg));
-        devcfg.mode = 0,                                //SPI mode 0
-        devcfg.clock_speed_hz = SPI_MASTER_FREQ_20M; 
-        devcfg.spics_io_num = cs;                       //CS pin
-        devcfg.queue_size = 256;                          
-        devcfg.command_bits = 5;
-        devcfg.address_bits = 11;
-        //devcfg.pre_cb = NULL;                           //Specify pre-transfer callback to handle D/C line
+        command_bits: 0,
+        address_bits: 0,
+        dummy_bits: 0,
+        mode: 0,
+        duty_cycle_pos: 0,
+        cs_ena_pretrans: 0,
+        cs_ena_posttrans: 0,
+        clock_speed_hz: SPI_MASTER_FREQ_40M,
+        input_delay_ns: 20,
+        spics_io_num: cs,
+        flags: 0,
+        queue_size: 256,
+        pre_cb: NULL, // pre_transaction_cb,
+        post_cb: NULL // post_transaction_cb
     };
 
     //Attach to the SPI bus
@@ -43,10 +67,7 @@ ADS::ADS(spi_host_device_t host, gpio_num_t cs)
 
 esp_err_t ADS::init()
 {
-    gpio_set_level(PIN_ADC_ENABLE, 1);
-    spi_device_acquire_bus(_spi, portMAX_DELAY);
-    gpio_set_level(PIN_ADC_ENABLE, 0);
-    gpio_set_level(PIN_ADC_ENABLE, 1);
+    acquire_bus();
 
     // write_cmd(ADCCMD_NOP, 0xFFFF, 0x01);
     // write_cmd(ADCCMD_WR_REG, 0xFFFF, 0x55);
@@ -67,35 +88,78 @@ esp_err_t ADS::init()
     write_cmd(ADCCMD_WR_REG, REG_OFST_CAL, OFST_CAL_4V096);
 
     // Custom channel seq mode
-    write_cmd(ADCCMD_WR_REG, REG_DEVICE_CFG, DEVICE_CFG_SEQMODE_CUSTOM);
+    // write_cmd(ADCCMD_WR_REG, REG_DEVICE_CFG, DEVICE_CFG_SEQMODE_CUSTOM);
+    // Manual channel seq moe
+    write_cmd(ADCCMD_WR_REG, REG_DEVICE_CFG, DEVICE_CFG_SEQMODE_MANUAL);
 
     // Only use channels 0, 2, 4, 6
-    write_cmd(ADCCMD_WR_REG, REG_AUTO_SEQ_CFG1, 
-          AUTO_SEQ_CFG1_EN_AIN0 
-        | AUTO_SEQ_CFG1_EN_AIN2 
-        | AUTO_SEQ_CFG1_EN_AIN4 
-        | AUTO_SEQ_CFG1_EN_AIN6
-        );
+    // write_cmd(ADCCMD_WR_REG, REG_AUTO_SEQ_CFG1, 
+    //       AUTO_SEQ_CFG1_EN_AIN0 
+    //     | AUTO_SEQ_CFG1_EN_AIN2 
+    //     | AUTO_SEQ_CFG1_EN_AIN4 
+    //     | AUTO_SEQ_CFG1_EN_AIN6
+    //     );
     
     // Repeat sequence, loop sequence
     //write_cmd(WR_REG, REG_AUTO_SEQ_CFG2, AUTO_SEQ_CFG2_AUTO_REPEAT);
     //write_cmd(WR_REG, REG_CCS_SEQ_LOOP, CCS_SEQ_LOOP_EN);
 
     // Set channel sequence indexes
-    write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(0), 0);
-    write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(1), 2);
-    write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(2), 4);
-    write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(3), 6);
-    write_cmd(ADCCMD_WR_REG, REG_CCS_END_INDEX, 4);
+    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(0), 0);
+    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(1), 2);
+    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(2), 4);
+    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(3), 6);
+    // write_cmd(ADCCMD_WR_REG, REG_CCS_END_INDEX, 4);
 
-    write_cmd(ADCCMD_WR_REG, REG_CCS_END_INDEX, 4);
-
-    gpio_set_level(PIN_ADC_ENABLE, 0);
-    gpio_set_level(PIN_ADC_ENABLE, 1);
-    spi_device_release_bus(_spi);
-    gpio_set_level(PIN_ADC_ENABLE, 0);
+    release_bus();
 
     return ESP_OK;
+}
+
+esp_err_t ADS::acquire_bus()
+{
+    esp_err_t ret = spi_device_acquire_bus(_spi, portMAX_DELAY);
+    ESP_ERROR_CHECK(ret);
+    return ret;
+}
+
+void ADS::release_bus()
+{
+    spi_device_release_bus(_spi);
+}
+
+void ADS::setChannel(const uint8_t channelno)
+{
+    acquire_bus();
+
+    // select channel
+    write_cmd(ADCCMD_WR_REG, REG_CHANNEL_ID, channelno & 0x07);
+}
+
+esp_err_t ADS::readChannel(uint16_t* counts, uint8_t* channel)
+{
+    acquire_bus();
+
+    spi_transaction_t t;
+    {
+        // memset(&t, 0, sizeof(t));       //Zero out the transaction
+        t.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
+        // t.base.cmd = ;
+        // t.base.addr = 0x0000;
+        t.length = 24;
+        t.rxlength = 0;
+        t.tx_data[0] = 0x00;
+        t.tx_data[1] = 0x00;
+        t.tx_data[2] = 0x00;
+        t.tx_data[3] = 0x00;
+    };
+    esp_err_t ret = spi_device_polling_transmit(_spi, &t);
+
+    *counts = t.rx_data[0] << 8 | t.rx_data[1];
+    if(channel)
+        *channel = t.rx_data[2] >> 4;
+
+    return ret;
 }
 
 void ADS::write_cmd(const adc_cmd_t cmd, const uint16_t address, const uint8_t data)
@@ -104,12 +168,11 @@ void ADS::write_cmd(const adc_cmd_t cmd, const uint16_t address, const uint8_t d
     {
         // memset(&t, 0, sizeof(t));       //Zero out the transaction
         t.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
-        t.cmd = cmd;
-        t.addr = address;
-        t.length = 8;
+        t.length = 24;
         t.rxlength = 0;
-        t.user=(void*)0;                //D/C needs to be set to 0
-        t.tx_data[0] = data;
+        t.tx_data[0] = cmd << 3;        // Top 3 address bits are discarded here!
+        t.tx_data[1] = address;         // Top 3 address bits are discarded here!
+        t.tx_data[2] = data;
     };
     // spi_transaction_t *rtrans;
 
@@ -130,8 +193,9 @@ esp_err_t ADS::read_test()
     #define TOTAL_BYTES     (3 + 3*N_CHANNELS)
 
     // since the NOP's are all zeroes, we'll write this as one command
-    static void* rxbuf = heap_caps_calloc(TOTAL_BYTES, 1, MALLOC_CAP_DMA);
-    static void* txbuf = heap_caps_calloc(TOTAL_BYTES, 1, MALLOC_CAP_DMA);
+    static uint8_t* rxbuf = (uint8_t*) heap_caps_calloc(TOTAL_BYTES, 1, MALLOC_CAP_DMA);
+    static uint8_t* txbuf = (uint8_t*) heap_caps_calloc(TOTAL_BYTES, 1, MALLOC_CAP_DMA);
+    txbuf[0] = SEQ_START_START;
     spi_transaction_t t;
     {
         memset(&t, 0, sizeof(t));       //Zero out the transaction
@@ -144,9 +208,7 @@ esp_err_t ADS::read_test()
         t.rx_buffer = rxbuf;                // read into rxbuf
         t.tx_buffer = txbuf;                // stat reading one further as we're writing (also 2 less)
     };
-    gpio_set_level(PIN_ADC_ENABLE, 1);
     esp_err_t ret = spi_device_polling_transmit(_spi, &t);
-    gpio_set_level(PIN_ADC_ENABLE, 0);
     assert( ret == ESP_OK );
 
     return ESP_OK;
