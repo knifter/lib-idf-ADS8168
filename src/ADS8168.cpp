@@ -155,8 +155,9 @@ esp_err_t ADS::readChannel(uint16_t* counts, uint8_t* channel)
     };
     esp_err_t ret = spi_device_polling_transmit(_spi, &t);
 
-    *counts = t.rx_data[0] << 8 | t.rx_data[1];
-    if(channel)
+    if(counts != NULL)
+        *counts = t.rx_data[0] << 8 | t.rx_data[1];
+    if(channel != NULL)
         *channel = t.rx_data[2] >> 4;
 
     return ret;

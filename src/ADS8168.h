@@ -14,7 +14,7 @@ class ADS
 
         esp_err_t init();
         void setChannel(const uint8_t channelno);
-        esp_err_t readChannel(uint16_t* counts, uint8_t* channel);
+        esp_err_t readChannel(uint16_t* counts = NULL, uint8_t* channel = NULL);
 
         esp_err_t read_test();
         esp_err_t acquire_bus();
