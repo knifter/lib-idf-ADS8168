@@ -92,25 +92,6 @@ esp_err_t ADS::init()
     // Manual channel seq moe
     write_cmd(ADCCMD_WR_REG, REG_DEVICE_CFG, DEVICE_CFG_SEQMODE_MANUAL);
 
-    // Only use channels 0, 2, 4, 6
-    // write_cmd(ADCCMD_WR_REG, REG_AUTO_SEQ_CFG1, 
-    //       AUTO_SEQ_CFG1_EN_AIN0 
-    //     | AUTO_SEQ_CFG1_EN_AIN2 
-    //     | AUTO_SEQ_CFG1_EN_AIN4 
-    //     | AUTO_SEQ_CFG1_EN_AIN6
-    //     );
-    
-    // Repeat sequence, loop sequence
-    //write_cmd(WR_REG, REG_AUTO_SEQ_CFG2, AUTO_SEQ_CFG2_AUTO_REPEAT);
-    //write_cmd(WR_REG, REG_CCS_SEQ_LOOP, CCS_SEQ_LOOP_EN);
-
-    // Set channel sequence indexes
-    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(0), 0);
-    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(1), 2);
-    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(2), 4);
-    // write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(3), 6);
-    // write_cmd(ADCCMD_WR_REG, REG_CCS_END_INDEX, 4);
-
     release_bus();
 
     return ESP_OK;
@@ -118,14 +99,22 @@ esp_err_t ADS::init()
 
 esp_err_t ADS::acquire_bus()
 {
+    if(_acquire_bus_cnt > 10)
+        return ESP_ERR_INVALID_ARG;
     esp_err_t ret = spi_device_acquire_bus(_spi, portMAX_DELAY);
     ESP_ERROR_CHECK(ret);
+    if(ret == ESP_OK)
+        _acquire_bus_cnt++;
     return ret;
 }
 
 void ADS::release_bus()
 {
-    spi_device_release_bus(_spi);
+    if(!_acquire_bus_cnt)
+        return;
+    _acquire_bus_cnt--;
+    if(_acquire_bus_cnt == 0)
+        spi_device_release_bus(_spi);
 }
 
 void ADS::setChannel(const uint8_t channelno)
@@ -136,7 +125,69 @@ void ADS::setChannel(const uint8_t channelno)
     write_cmd(ADCCMD_WR_REG, REG_CHANNEL_ID, channelno & 0x07);
 }
 
-esp_err_t ADS::readChannel(uint16_t* counts, uint8_t* channel)
+esp_err_t ADS::setSequence(const uint8_t length, const uint8_t* channels, const uint8_t repeat, const bool loop) 
+{
+    if(length<1 || length > 16)
+        // ERROR("Sequence max length = 16");
+        return ESP_ERR_INVALID_ARG;
+
+    // Sequence mode enabled
+    write_cmd(ADCCMD_WR_REG, REG_DEVICE_CFG, DEVICE_CFG_SEQMODE_CUSTOM);
+
+    // Set channel sequence indexes
+    for(uint8_t c=0; c<length; c++)
+    {
+        write_cmd(ADCCMD_WR_REG, REG_CCS_CHID_IDX(c), channels[c]);
+        write_cmd(ADCCMD_WR_REG, REG_CCS_REPEAT_IDX(c), repeat);
+    };
+
+    // Repeat sequence, loop sequence
+    write_cmd(ADCCMD_WR_REG, REG_CCS_SEQ_LOOP, loop ? CCS_SEQ_LOOP_EN : 0x00);
+
+    // Sequence length, start-stop
+    write_cmd(ADCCMD_WR_REG, REG_CCS_START_INDEX, 0);
+    write_cmd(ADCCMD_WR_REG, REG_CCS_END_INDEX, length-1);
+
+
+    return ESP_OK;
+};
+
+void ADS::sequenceStart()
+{
+    write_cmd(ADCCMD_WR_REG, REG_SEQ_START, SEQ_START_START);
+}
+
+uint16_t ADS::readChannel(uint8_t* channel_out)
+{
+    spi_transaction_t t;
+    {
+        // memset(&t, 0, sizeof(t));       //Zero out the transaction
+        t.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
+        // t.base.cmd = ;
+        // t.base.addr = 0x0000;
+        t.length = (channel_out != NULL) ? 24 : 16;
+        t.rxlength = 0;
+        t.tx_data[0] = 0x00;
+        t.tx_data[1] = 0x00;
+        t.tx_data[2] = 0x00;
+        t.tx_data[3] = 0x00;
+    };
+    esp_err_t ret = spi_device_polling_transmit(_spi, &t);
+    ESP_ERROR_CHECK(ret);
+
+    if(channel_out != NULL)
+        *channel_out = t.rx_data[2] >> 4;
+
+    return t.rx_data[0] << 8 | t.rx_data[1];
+}
+
+void ADS::enableOTFMode()
+{
+    write_cmd(ADCCMD_WR_REG, REG_DEVICE_CFG, DEVICE_CFG_SEQMODE_ONTHEFLY);
+    write_cmd(ADCCMD_WR_REG, REG_ON_THE_FLY_CFG, ON_THE_FLY_CFG_OTF_EN);
+}
+
+uint16_t ADS::readChannelOTF(const uint8_t otf_next_channel)
 {
     acquire_bus();
 
@@ -146,21 +197,17 @@ esp_err_t ADS::readChannel(uint16_t* counts, uint8_t* channel)
         t.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
         // t.base.cmd = ;
         // t.base.addr = 0x0000;
-        t.length = 24;
+        t.length = 16;
         t.rxlength = 0;
-        t.tx_data[0] = 0x00;
+        t.tx_data[0] = 0x80 | (otf_next_channel << 3);
         t.tx_data[1] = 0x00;
         t.tx_data[2] = 0x00;
         t.tx_data[3] = 0x00;
     };
     esp_err_t ret = spi_device_polling_transmit(_spi, &t);
+    ESP_ERROR_CHECK(ret);
 
-    if(counts != NULL)
-        *counts = t.rx_data[0] << 8 | t.rx_data[1];
-    if(channel != NULL)
-        *channel = t.rx_data[2] >> 4;
-
-    return ret;
+    return t.rx_data[0] << 8 | t.rx_data[1];
 }
 
 void ADS::write_cmd(const adc_cmd_t cmd, const uint16_t address, const uint8_t data)
@@ -182,8 +229,7 @@ void ADS::write_cmd(const adc_cmd_t cmd, const uint16_t address, const uint8_t d
     // ret = spi_device_queue_trans(_spi, &t, portMAX_DELAY);
     // ret = spi_device_polling_end(_spi, portMAX_DELAY);
     ret = spi_device_polling_transmit(_spi, &t);  //Transmit!
-
-    assert(ret==ESP_OK);                //Should have had no issues.
+    ESP_ERROR_CHECK(ret);
 }
 
 esp_err_t ADS::read_test()
@@ -210,7 +256,7 @@ esp_err_t ADS::read_test()
         t.tx_buffer = txbuf;                // stat reading one further as we're writing (also 2 less)
     };
     esp_err_t ret = spi_device_polling_transmit(_spi, &t);
-    assert( ret == ESP_OK );
+    ESP_ERROR_CHECK(ret);
 
     return ESP_OK;
 }
