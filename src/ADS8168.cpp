@@ -188,8 +188,15 @@ void ADS::enableOTFMode()
 }
 
 uint16_t ADS::readChannelOTF(const uint8_t otf_next_channel)
-{
-    acquire_bus();
+{    
+    uint8_t cmd = ADCCMD_ONTHEFLY | (otf_next_channel & 0x03);
+
+    // There appears to be a 'feature' in the adc where setting the otf channel repeatedly to
+    // same one will return 0xFFFF.
+    // static uint8_t last_otf = 0xFF;
+    // if(last_otf == otf_next_channel)
+    //     cmd = 0x00;
+    // last_otf = otf_next_channel;
 
     spi_transaction_t t;
     {
@@ -199,7 +206,7 @@ uint16_t ADS::readChannelOTF(const uint8_t otf_next_channel)
         // t.base.addr = 0x0000;
         t.length = 16;
         t.rxlength = 0;
-        t.tx_data[0] = 0x80 | (otf_next_channel << 3);
+        t.tx_data[0] = cmd << 3;
         t.tx_data[1] = 0x00;
         t.tx_data[2] = 0x00;
         t.tx_data[3] = 0x00;

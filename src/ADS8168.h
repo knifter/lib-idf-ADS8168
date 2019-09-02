@@ -30,7 +30,8 @@ class ADS
             ADCCMD_WR_REG      = 0b00001,
             ADCCMD_RD_REG      = 0b00010,
             ADCCMD_SET_BITS    = 0b00011,
-            ADCCMD_CLR_BITS    = 0b00100
+            ADCCMD_CLR_BITS    = 0b00100,
+            ADCCMD_ONTHEFLY    = 0b10000
         } adc_cmd_t;
 
         void write_cmd(const adc_cmd_t cmd, const uint16_t address, const uint8_t data);
