@@ -5,24 +5,26 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 
-class ADS
+class ADS8168
 {
     public:
-        ADS(spi_host_device_t host, gpio_num_t cs);
-        //~ADS();
+        ADS8168(spi_host_device_t host, gpio_num_t cs);
 
-        esp_err_t init();
-        void setChannel(const uint8_t channelno);
-        esp_err_t setSequence(const uint8_t length, const uint8_t* channels, const uint8_t repeat = 1, bool loop = false);
-        void sequenceStart();
-        uint16_t readChannel(uint8_t* channel_out = NULL);
-        void enableOTFMode();
-        uint16_t readChannelOTF(const uint8_t otf_channel_next);
+        esp_err_t   init();
+        esp_err_t   acquire_bus();
+        void        release_bus();
 
+        // Ad-Hoc mode
+        void        setChannel(const uint8_t channelno);
+        uint16_t    readChannel(uint8_t* channel_out = NULL);
 
-        esp_err_t read_test();
-        esp_err_t acquire_bus();
-        void release_bus();
+        // Custom Sequence mode
+        esp_err_t   setSequence(const uint8_t length, const uint8_t* channels, const uint8_t repeat = 1, bool loop = false);
+        void        sequenceStart();
+
+        // On-The-Fly Mode
+        void        enableOTFMode();
+        uint16_t    readChannelOTF(const uint8_t otf_channel_next);
 
     protected:
         typedef enum {
@@ -40,8 +42,8 @@ class ADS
         uint8_t _acquire_bus_cnt = 0;
 
     private:
-        ADS(const ADS&);
-        ADS& operator=(const ADS&);
+        ADS8168(const ADS8168&);
+        ADS8168& operator=(const ADS8168&);
 };
 
 #endif // __ADS8168_H
