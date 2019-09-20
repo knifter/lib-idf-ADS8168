@@ -22,7 +22,7 @@ class ADS8168
         esp_err_t   setSequence(const uint8_t length, const uint8_t* channels, const uint8_t repeat = 1, bool loop = false);
         void        sequenceStart();
 
-        // On-The-Fly Mode
+        // On-The-Fly Mode, Crappy 0xFFFF problems..
         void        enableOTFMode();
         uint16_t    readChannelOTF(const uint8_t otf_channel_next);
 
